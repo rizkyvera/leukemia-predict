@@ -2,3 +2,4 @@ models/
 Ground Truth/
 __pycache__/
 Test/
+.venv

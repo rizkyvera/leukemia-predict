@@ -7,6 +7,8 @@ import cv2
 from PIL import Image
 import albumentations as A
 import os
+import gdown
+import zipfile
 from albumentations.pytorch import ToTensorV2
 
 # ── Page config ────────────────────────────────────────────────
@@ -110,6 +112,20 @@ MODEL_PATHS = {
     "baseline": "models/best_vgg16_baseline.pth",
 }
 
+MODEL_URLS = {
+    "unet":     "https://docs.google.com/uc?export=download&id=16sP1Hqp3Gi8YllqGEBM1VHynWONH3B5F",
+    "cnn_unet": "https://docs.google.com/uc?export=download&id=1C2lPU2yfdrQtiIcEG2ovh591BfBBh0kU",
+    "baseline": "https://docs.google.com/uc?export=download&id=1BO4YzQYzXDVB8cCErxp88OemC5_znBB9",
+}
+
+def download_model_if_not_exists(model_key):
+    path = MODEL_PATHS[model_key]
+    url = MODEL_URLS[model_key]
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        print(f"Downloading {model_key} model from cloud...")
+        gdown.download(url, path, quiet=False)
+
 # ── Transform ─────────────────────────────────────────────────
 val_transform = A.Compose([
     A.Resize(IMG_SIZE, IMG_SIZE),
@@ -168,9 +184,30 @@ def build_vgg16():
     )
     return vgg
 
+# ── Prepare Datasets ───────────────────────────────────────────
+@st.cache_resource
+def prepare_datasets():
+    datasets = [
+        ("Test.zip", "Test", "https://docs.google.com/uc?export=download&id=1x-PplP-0eyNqS8X73XHnScs5vHjACiG8"),
+        ("Ground Truth.zip", "Ground Truth", "https://docs.google.com/uc?export=download&id=1IYpNv-bf7jPPFdFP8h-tHk0Nk-91sG1d")
+    ]
+    for zip_name, folder_name, url in datasets:
+        if not os.path.exists(folder_name):
+            if not os.path.exists(zip_name):
+                print(f"Downloading {zip_name} from cloud...")
+                gdown.download(url, zip_name, quiet=False)
+            
+            if os.path.exists(zip_name):
+                print(f"Extracting {zip_name}...")
+                with zipfile.ZipFile(zip_name, 'r') as zip_ref:
+                    zip_ref.extractall(".")
+
 # ── Load Models (cached) ───────────────────────────────────────
 @st.cache_resource
 def load_models():
+    for key in MODEL_PATHS.keys():
+        download_model_if_not_exists(key)
+
     # U-Net
     unet = UNet().to(DEVICE)
     unet.load_state_dict(torch.load(MODEL_PATHS["unet"], map_location=DEVICE))
@@ -288,11 +325,12 @@ def find_ground_truth_for_path(path):
 st.markdown(f'<div class="main-title">{get_icon("microscope")} Leukemia Detection System</div>', unsafe_allow_html=True)
 st.markdown("<p style='font-size: 1.1rem; color: #4b5563; margin-bottom: 2rem;'><strong>Model Prediksi Leukemia Berbasis Segmentasi Otomatis Sel Darah Putih — U-Net + VGG16</strong></p>", unsafe_allow_html=True)
 
-# Load models
-with st.spinner("Memuat model... Harap tunggu."):
+# Load models & datasets
+with st.spinner("Menyiapkan dataset dan memuat model... Harap tunggu."):
     try:
+        prepare_datasets()
         unet_model, cnn_unet_model, baseline_model = load_models()
-        st.markdown(f'<div class="alert-success">{get_icon("check")} Semua model berhasil dimuat!</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="alert-success">{get_icon("check")} Dataset dan Model siap digunakan!</div>', unsafe_allow_html=True)
     except Exception as e:
         st.markdown(f'<div class="alert-error">{get_icon("alert")} Gagal memuat model: {e}</div>', unsafe_allow_html=True)
         st.stop()
@@ -398,13 +436,13 @@ if uploaded or test_choice:
         with st.spinner("Melakukan segmentasi U-Net..."):
             mask, masked, mask_raw, coverage = predict_unet_only(unet_model, img_t)
 
-        # Tampilkan: [Original] | [ground truth] | [Prediction (Masked)]
+        # Tampilkan: [Original] | [Ground Truth Mask] | [Prediction (Masked)]
         col1, col2, col3 = st.columns(3)
         with col1:
             render_section_title("Original", "image")
             st.image(img_display, width=360)
         with col2:
-            render_section_title("ground truth", "mask")
+            render_section_title("Ground Truth Mask", "mask")
             if gt_path_single:
                 gt = cv2.imread(gt_path_single, cv2.IMREAD_GRAYSCALE)
                 gt_resized = cv2.resize(gt, (IMG_SIZE, IMG_SIZE))
